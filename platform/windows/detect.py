@@ -175,18 +175,23 @@ def configure(env):
 			env.Append(CPPPATH=['#tools/freetype'])
 			env.Append(CPPPATH=['#tools/freetype/freetype/include'])
 
-		env["CC"] = gcc_prefix+"gcc.exe"
-		env['AS'] = gcc_prefix+"as.exe"
-		env['CXX'] = gcc_prefix+"g++.exe"
-		env['AR'] = gcc_prefix+"ar.exe"
-		env['RANLIB'] = gcc_prefix+"ranlib.exe"
-		env['LD'] = gcc_prefix+"g++.exe"
+		if (os.name=="posix"):
+			gcc_postfix = ""
+		else:
+			gcc_postfix = ".exe"
+
+		env["CC"] = gcc_prefix+"gcc"+gcc_postfix
+		env['AS'] = gcc_prefix+"as"+gcc_postfix
+		env['CXX'] = gcc_prefix+"g++"+gcc_postfix
+		env['AR'] = gcc_prefix+"ar"+gcc_postfix
+		env['RANLIB'] = gcc_prefix+"gcc-ranlib"+gcc_postfix
+		env['LD'] = gcc_prefix+"g++"+gcc_postfix
 
 		#C++ standard here has to be gnu++11, not c++11, because with the latter it can't find the
 		#right stdlibs and such
 		env.Append(CCFLAGS=['-DWINDOWS_ENABLED', '-DWIN98_ENABLED', '-D_UNICODE', '-DUNICODE', '-mwindows', '-D__MSVCRT_VERSION__=0x400', '-DWINDOWS_USE_MUTEX=1', '-std=gnu++11'])
 		env.Append(CPPFLAGS=['-DRTAUDIO_ENABLED', '-DWIN98_ENABLED', '-D_UNICODE', '-DUNICODE', '-DMINGW_ENABLED', '-std=gnu++11'])
-		env.Append(CCFLAGS=['-DGLES1_ENABLED', '-DOPENGL_ENABLED', '-DGLES_OVER_GL', '-DGLEW_ENABLED', '-DMINGW_ENABLED', '-DNO_SAFE_CAST', '-fno-rtti'])
+		env.Append(CCFLAGS=['-DGL11_ENABLED', '-DOPENGL_ENABLED', '-DGLES_OVER_GL', '-DGLEW_ENABLED', '-DMINGW_ENABLED', '-DNO_SAFE_CAST', '-fno-rtti'])
 		env.Append(LIBS=['unicows', 'mingw32', 'opengl32', 'dsound', 'ole32', 'winmm', 'gdi32', 'iphlpapi', 'wsock32', 'kernel32', 'comctl32'])
 
 		env.Append(LINKFLAGS=['-Wl,--stack,'+str(16*1024*1024), '-static-libgcc'])

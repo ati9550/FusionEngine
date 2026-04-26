@@ -5875,10 +5875,13 @@ void RasterizerGLES2::_render(const Geometry *p_geometry,const Material *p_mater
 			for(const List<Immediate::Chunk>::Element *E=im->chunks.front();E;E=E->next()) {
 
 				const Immediate::Chunk &c=E->get();
-				if (c.vertices.empty()) {
+				int vertex_count = c.vertices.size();
+
+				if (vertex_count== 0) {
 					continue;
 				}
-				for(int i=0;i<c.vertices.size();i++)
+				_rinfo.vertex_count+=vertex_count;
+				// for(int i=0;i<c.vertices.size();i++)
 
 				if (c.texture.is_valid() && texture_owner.owns(c.texture)) {
 
@@ -5950,7 +5953,7 @@ void RasterizerGLES2::_render(const Geometry *p_geometry,const Material *p_mater
 
 				glEnableVertexAttribArray(VS::ARRAY_VERTEX);
 				glVertexAttribPointer(VS::ARRAY_VERTEX, 3, GL_FLOAT, false,sizeof(Vector3),c.vertices.ptr());
-				glDrawArrays(gl_primitive[c.primitive],0,c.vertices.size());
+				glDrawArrays(gl_primitive[c.primitive],0,vertex_count);
 
 
 			}
@@ -6267,7 +6270,8 @@ void RasterizerGLES2::_render_list_forward(RenderList *p_render_list,const Trans
 					 } break;
 					case VS::MATERIAL_BLEND_MODE_MUL: {
 						glBlendEquation(GL_FUNC_ADD);
-						glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
+						//glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
+						glBlendFunc(GL_DST_COLOR,GL_ZERO);
 
 					} break;
 					case VS::MATERIAL_BLEND_MODE_PREMULT_ALPHA: break;
@@ -7733,7 +7737,8 @@ void RasterizerGLES2::canvas_set_blend_mode(VS::MaterialBlendMode p_mode) {
 		} break;
 		case VS::MATERIAL_BLEND_MODE_PREMULT_ALPHA: {
 			glBlendEquation(GL_FUNC_ADD);
-			glBlendFunc(GL_ONE,GL_ONE_MINUS_SRC_ALPHA);
+			//glBlendFunc(GL_ONE,GL_ONE_MINUS_SRC_ALPHA);
+			glBlendFunc(GL_DST_COLOR,GL_ZERO);
 		} break;
 
 	}
@@ -9327,7 +9332,7 @@ int RasterizerGLES2::get_render_info(VS::RenderInfo p_info) {
 		} break;
 		case VS::INFO_VERTEX_MEM_USED: {
 
-			return 0;
+			return _rinfo.vertex_count * 12; // assuming it stores 32bit float positions
 		} break;
 	}
 

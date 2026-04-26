@@ -187,7 +187,7 @@ RasterizerPSP::FX::FX() {
 
 static const int prim_type[]={GU_POINTS,GU_LINES,GU_TRIANGLES,GU_TRIANGLE_FAN};
 
-static void _draw_primitive(int p_points, const Vector3 *p_vertices, const Vector3 *p_normals, const Color* p_colors, const Vector3 *p_uvs,const Plane *p_tangents=NULL,int p_instanced=1) {
+void RasterizerPSP::_draw_primitive(int p_points, const Vector3 *p_vertices, const Vector3 *p_normals, const Color* p_colors, const Vector3 *p_uvs,const Plane *p_tangents,int p_instanced) {
 	ERR_FAIL_COND(!p_vertices);
 	ERR_FAIL_COND(p_points <1 || p_points>4);
 
@@ -2214,45 +2214,124 @@ RID RasterizerPSP::immediate_create() {
 
 void RasterizerPSP::immediate_begin(RID p_immediate, VS::PrimitiveType p_rimitive, RID p_texture){
 
+	Immediate *im = immediate_owner.get(p_immediate);
+	ERR_FAIL_COND(!im);
+	ERR_FAIL_COND(im->building);
+
+	Immediate::Chunk ic;
+	ic.texture=p_texture;
+	ic.primitive=p_rimitive;
+	im->chunks.push_back(ic);
+	im->mask=0;
+	im->building=true;
+
 
 }
 void RasterizerPSP::immediate_vertex(RID p_immediate,const Vector3& p_vertex){
 
+	Immediate *im = immediate_owner.get(p_immediate);
+	ERR_FAIL_COND(!im);
+	ERR_FAIL_COND(!im->building);
+
+	Immediate::Chunk *c = &im->chunks.back()->get();
+
+
+	if (c->vertices.empty() && im->chunks.size()==1) {
+
+		im->aabb.pos=p_vertex;
+		im->aabb.size=Vector3();
+	} else {
+		im->aabb.expand_to(p_vertex);
+	}
+
+	if (im->mask&VS::ARRAY_FORMAT_NORMAL)
+		c->normals.push_back(chunk_normal);
+	if (im->mask&VS::ARRAY_FORMAT_TANGENT)
+		c->tangents.push_back(chunk_tangent);
+	if (im->mask&VS::ARRAY_FORMAT_COLOR)
+		c->colors.push_back(chunk_color);
+	if (im->mask&VS::ARRAY_FORMAT_TEX_UV)
+		c->uvs.push_back(chunk_uv);
+	if (im->mask&VS::ARRAY_FORMAT_TEX_UV2)
+		c->uvs2.push_back(chunk_uv2);
+	im->mask|=VS::ARRAY_FORMAT_VERTEX;
+	c->vertices.push_back(p_vertex);
 
 }
 void RasterizerPSP::immediate_normal(RID p_immediate,const Vector3& p_normal){
 
+	Immediate *im = immediate_owner.get(p_immediate);
+	ERR_FAIL_COND(!im);
+	ERR_FAIL_COND(!im->building);
+
+	im->mask|=VS::ARRAY_FORMAT_NORMAL;
+	chunk_normal=p_normal;
 
 }
 void RasterizerPSP::immediate_tangent(RID p_immediate,const Plane& p_tangent){
 
+	Immediate *im = immediate_owner.get(p_immediate);
+	ERR_FAIL_COND(!im);
+	ERR_FAIL_COND(!im->building);
+
+	im->mask|=VS::ARRAY_FORMAT_TANGENT;
+	chunk_tangent=p_tangent;
 
 }
 void RasterizerPSP::immediate_color(RID p_immediate,const Color& p_color){
 
+	Immediate *im = immediate_owner.get(p_immediate);
+	ERR_FAIL_COND(!im);
+	ERR_FAIL_COND(!im->building);
+
+	im->mask|=VS::ARRAY_FORMAT_COLOR;
+	chunk_color=p_color;
 
 }
 void RasterizerPSP::immediate_uv(RID p_immediate,const Vector2& tex_uv){
 
+	Immediate *im = immediate_owner.get(p_immediate);
+	ERR_FAIL_COND(!im);
+	ERR_FAIL_COND(!im->building);
+
+	im->mask|=VS::ARRAY_FORMAT_TEX_UV;
+	chunk_uv=tex_uv;
 
 }
 void RasterizerPSP::immediate_uv2(RID p_immediate,const Vector2& tex_uv){
 
+	Immediate *im = immediate_owner.get(p_immediate);
+	ERR_FAIL_COND(!im);
+	ERR_FAIL_COND(!im->building);
+
+	im->mask|=VS::ARRAY_FORMAT_TEX_UV2;
+	chunk_uv2=tex_uv;
 
 }
 
 void RasterizerPSP::immediate_end(RID p_immediate){
 
+	Immediate *im = immediate_owner.get(p_immediate);
+	ERR_FAIL_COND(!im);
+	ERR_FAIL_COND(!im->building);
+
+	im->building=false;
 
 }
 void RasterizerPSP::immediate_clear(RID p_immediate) {
 
+	Immediate *im = immediate_owner.get(p_immediate);
+	ERR_FAIL_COND(!im);
+	ERR_FAIL_COND(im->building);
 
+	im->chunks.clear();
 }
 
 AABB RasterizerPSP::immediate_get_aabb(RID p_immediate) const {
 
-	return AABB(Vector3(-1,-1,-1),Vector3(2,2,2));
+	Immediate *im = immediate_owner.get(p_immediate);
+	ERR_FAIL_COND_V(!im,AABB());
+	return im->aabb;
 }
 
 void RasterizerPSP::immediate_set_material(RID p_immediate,RID p_material) {
@@ -3072,7 +3151,7 @@ void RasterizerPSP::add_light( RID p_light_instance ) {
 
 		case VisualServer::LIGHT_DIRECTIONAL: {
 
-			li->light_vector = camera_transform_inverse.basis.xform(li->transform.basis.get_axis(2)).normalized();
+			li->light_vector = Transform3D().basis.xform(li->transform.basis.get_axis(2)).normalized();
 			if (directional_light_count<MAX_HW_LIGHTS) {
 
 				directional_lights[directional_light_count++]=li;
@@ -3085,7 +3164,7 @@ void RasterizerPSP::add_light( RID p_light_instance ) {
 			  if (radius==0)
 				  radius=0.0001;
 			  li->linear_att=(LIGHT_FADE_TRESHOLD)/radius;
-			  li->light_vector = camera_transform_inverse.xform(li->transform.origin);
+			  li->light_vector = Transform3D().xform(li->transform.origin);
 
 		} break;
 		case VisualServer::LIGHT_SPOT: {
@@ -3094,8 +3173,8 @@ void RasterizerPSP::add_light( RID p_light_instance ) {
 			if (radius==0)
 				radius=0.0001;
 			li->linear_att=(LIGHT_FADE_TRESHOLD)/radius;
-			li->light_vector = camera_transform_inverse.xform(li->transform.origin);
-			li->spot_vector = -camera_transform_inverse.basis.xform(li->transform.basis.get_axis(2)).normalized();
+			li->light_vector = Transform3D().xform(li->transform.origin);
+			li->spot_vector = -Transform3D().basis.xform(li->transform.basis.get_axis(2)).normalized();
 			//li->sort_key|=LIGHT_SPOT_BIT; // this way, omnis go first, spots go last and less shader versions are generated
 
 			/*
@@ -3268,6 +3347,17 @@ void RasterizerPSP::add_multimesh( const RID& p_multimesh, const InstanceData *p
 
 }
 
+void RasterizerPSP::add_immediate( const RID& p_immediate, const InstanceData *p_data) {
+
+
+	Immediate *immediate = immediate_owner.get(p_immediate);
+	ERR_FAIL_COND(!immediate);
+
+	_add_geometry(immediate,p_data,immediate,NULL);
+
+}
+
+
 void RasterizerPSP::add_particles( const RID& p_particle_instance, const InstanceData *p_data){
 
 	//print_line("adding particles");
@@ -3307,15 +3397,15 @@ void RasterizerPSP::_setup_texture(const Texture *texture) {
 
 	sceGuEnable(GU_TEXTURE_2D);
 	sceGuTexMode(texture->gu_format_cache, texture->mipmaps.size()-1, 0, texture->swizzle);
-	sceGuTexFunc(GU_TFX_REPLACE,GU_TCC_RGBA);
-	// if (texture->flags&VS::TEXTURE_FLAG_REPEAT) {
-	// 	sceGuTexWrap(GU_REPEAT, GU_REPEAT);
-	// } else {
+	sceGuTexFunc(GU_TFX_MODULATE,GU_TCC_RGBA);
+	if (texture->flags&VS::TEXTURE_FLAG_REPEAT) {
+		sceGuTexWrap(GU_REPEAT, GU_REPEAT);
+	} else {
 		sceGuTexWrap(GU_CLAMP, GU_CLAMP);
-	// }
+	}
 
 	if (texture->mipmaps.size() > 1) {
-		sceGuTexLevelMode(GU_TEXTURE_AUTO, 0.f);
+		sceGuTexLevelMode(GU_TEXTURE_AUTO, -1.f);
 		sceGuTexFilter(GU_LINEAR_MIPMAP_LINEAR, GU_LINEAR);
 	} else {
 		sceGuTexFilter(GU_LINEAR, GU_LINEAR);
@@ -3353,6 +3443,7 @@ void RasterizerPSP::_setup_fixed_material(const Geometry *p_geometry,const Mater
 		sceGuSendCommandi(88, (diffuse_rgba >> 24) & 0xFF);
 
 		sceGuMaterial(GU_DIFFUSE,diffuse_rgba);
+
 		//specular
 
 		const Color specular_color=p_material->parameters[VS::FIXED_MATERIAL_PARAM_SPECULAR];
@@ -3450,15 +3541,17 @@ void RasterizerPSP::_setup_material(const Geometry *p_geometry,const Material *p
 
 				} break;
 				case VS::MATERIAL_BLEND_MODE_ADD: {
-					sceGuBlendFunc(GU_ADD, GU_SRC_ALPHA, GU_DST_ALPHA, 0, 0);
-
+					//sceGuBlendFunc(GU_ADD, GU_SRC_ALPHA, GU_DST_ALPHA, 0, 0);
+					sceGuBlendFunc(GU_ADD, GU_SRC_ALPHA, GU_ONE_MINUS_DST_ALPHA, GU_SRC_ALPHA, GU_DST_ALPHA);
 				} break;
 				case VS::MATERIAL_BLEND_MODE_SUB: {
-					sceGuBlendFunc(GU_SUBTRACT, GU_SRC_ALPHA, GU_DST_ALPHA, GU_SRC_ALPHA, GU_DST_ALPHA);
+					//sceGuBlendFunc(GU_SUBTRACT, GU_SRC_ALPHA, GU_DST_ALPHA, GU_SRC_ALPHA, GU_DST_ALPHA);
+					sceGuBlendFunc(GU_SUBTRACT, GU_SRC_ALPHA, GU_ONE_MINUS_DST_ALPHA, GU_SRC_ALPHA, GU_DST_ALPHA);
 				} break;
 				case VS::MATERIAL_BLEND_MODE_MUL: {
 					// sceGuBlendFunc(GU_ADD, GU_SRC_ALPHA, GU_ONE_MINUS_SRC_ALPHA, GU_SRC_ALPHA, GU_ONE_MINUS_SRC_ALPHA);
-					sceGuBlendFunc(GU_ADD, GU_SRC_ALPHA, GU_ONE_MINUS_SRC_ALPHA,0,0);
+					// sceGuBlendFunc(GU_ADD, GU_SRC_ALPHA, GU_ONE_MINUS_SRC_ALPHA,0,0);
+					sceGuBlendFunc(GU_ADD, GU_DST_COLOR, GU_FIX, GU_SRC_ALPHA, GU_DST_ALPHA);
 
 				} break;
 
@@ -3469,7 +3562,7 @@ void RasterizerPSP::_setup_material(const Geometry *p_geometry,const Material *p
 		if (lighting!=!p_material->flags[VS::MATERIAL_FLAG_UNSHADED]) {
 			if (p_material->flags[VS::MATERIAL_FLAG_UNSHADED]) {
 				// glDisable(GL_LIGHTING);
-				//sceGuDisable(GU_LIGHTING);
+				sceGuDisable(GU_LIGHTING);
 			} else {
 				// glEnable(GL_LIGHTING);
 				sceGuEnable(GU_LIGHTING);
@@ -3526,10 +3619,10 @@ void RasterizerPSP::_setup_light(LightInstance* p_instance, int p_idx) {
 	ERR_FAIL_COND(p_idx > MAX_HW_LIGHTS);
 
 	Color diff_color = ld->colors[VS::LIGHT_COLOR_DIFFUSE];
-	float emult = ld->vars[VS::LIGHT_PARAM_ENERGY];
+	float emult = sqrt(ld->vars[VS::LIGHT_PARAM_ENERGY]); // to roughly match GLES1
 
-	if (ld->type!=VS::LIGHT_DIRECTIONAL)
-		emult*=4.0;
+	// if (ld->type!=VS::LIGHT_DIRECTIONAL)
+	// 	emult*=4.0;
 
 	// sceGuLightMode(GU_SEPARATE_SPECULAR_COLOR);
 	
@@ -3556,7 +3649,7 @@ void RasterizerPSP::_setup_light(LightInstance* p_instance, int p_idx) {
 				p_instance->light_vector.z,
 			})); //at modelview
 
-			sceGuLightAtt(p_idx, 0, p_instance->linear_att, 0);
+			sceGuLightAtt(p_idx, 0, p_instance->linear_att * (100 / emult), 0);
 
 		} break;
 		case VS::LIGHT_SPOT: {
@@ -3573,7 +3666,7 @@ void RasterizerPSP::_setup_light(LightInstance* p_instance, int p_idx) {
 					p_instance->spot_vector.z,
 				}), 5.0, 1/ld->vars[VS::LIGHT_PARAM_SPOT_ANGLE]);
 
-			sceGuLightAtt(p_idx, 0, p_instance->linear_att, 0);
+			sceGuLightAtt(p_idx, 0, p_instance->linear_att * (100 / emult), 0);
 
 		} break;
 
@@ -3581,13 +3674,20 @@ void RasterizerPSP::_setup_light(LightInstance* p_instance, int p_idx) {
 	}
 
 	sceGuLightColor(p_idx, GU_DIFFUSE, MK_RGBA_F(
-		diff_color.r*emult,
-		diff_color.g*emult,
-		diff_color.b*emult,
+		CLAMP(diff_color.r * emult, 0, 1.0),
+		CLAMP(diff_color.g * emult, 0, 1.0),
+		CLAMP(diff_color.b * emult, 0, 1.0),
 		1.0
 	));
 
-	sceGuLightColor(p_idx, GU_AMBIENT, MK_RGBA_F(0, 0, 0, 1));
+	sceGuLightColor(p_idx, GU_AMBIENT, MK_RGBA_F(
+		CLAMP(diff_color.r * emult - 1.0, 0, 1.0),
+		CLAMP(diff_color.g * emult - 1.0, 0, 1.0),
+		CLAMP(diff_color.b * emult - 1.0, 0, 1.0),
+		1.0
+	)); // to compensate for clamping diffuse it can bleed in ambient a bit
+
+	// sceGuLightColor(p_idx, GU_AMBIENT, MK_RGBA_F(0,0,0,1));
 
 	Color spec_color = ld->colors[VS::LIGHT_COLOR_SPECULAR];
 	sceGuLightColor(p_idx, GU_SPECULAR, MK_RGBA_F(
@@ -3612,9 +3712,9 @@ void RasterizerPSP::_setup_lights(const uint16_t * p_lights,int p_light_count) {
 	for (int i=directional_light_count; i<MAX_HW_LIGHTS; i++) {
 
 		if (i<(directional_light_count+p_light_count)) {
-			
+
 			sceGuEnable(GU_LIGHT0 + i);
-			_setup_light(light_instances[p_lights[i]], i);
+			_setup_light(light_instances[p_lights[i-directional_light_count]], i);
 
 		} else {
 
@@ -3858,6 +3958,55 @@ void RasterizerPSP::_render(const Geometry *p_geometry,const Material *p_materia
 				sceGumDrawArray(gl_primitive[s->primitive], s->psp_vattribs|GU_INDEX_16BIT|GU_TRANSFORM_3D, s->index_array_len, s->index_array_local, s->psp_array_local);
 			}
 		 } break;
+		case Geometry::GEOMETRY_IMMEDIATE: {
+
+			const Immediate *im = static_cast<const Immediate*>( p_geometry );
+			if (im->building) {
+				return;
+			}
+
+			for(const List<Immediate::Chunk>::Element *E=im->chunks.front();E;E=E->next()) {
+
+				const Immediate::Chunk &c=E->get();
+				int vertex_count = c.vertices.size();
+
+				if (vertex_count == 0) {
+					continue;
+				}
+				_rinfo.vertex_count+=vertex_count;
+
+				if (c.texture.is_valid() && texture_owner.owns(c.texture)) {
+
+					sceGuEnable(GU_TEXTURE_2D);
+					_setup_texture(texture_owner.get(c.texture));
+				} else {
+
+					sceGuDisable(GU_TEXTURE_2D);
+				}
+
+				VertexPool vp(vertex_count);
+				vp.vertex(c.vertices.ptr());
+
+				if (!c.normals.empty()) {
+
+					vp.normal(c.normals.ptr());
+				}
+
+				if (!c.colors.empty()) {
+
+					vp.color(c.colors.ptr());
+				}
+
+				if (!c.uvs.empty()) {
+
+					vp.uv(c.uvs.ptr());
+				}
+
+				sceGumDrawArray(gl_primitive[c.primitive], vp.attrs() | GU_TRANSFORM_3D, vp.size(), nullptr, vp.pack());
+			}
+
+
+		} break;
 		case Geometry::GEOMETRY_PARTICLES: {
 
 
@@ -3913,7 +4062,7 @@ void RasterizerPSP::_render(const Geometry *p_geometry,const Material *p_materia
 
 				sceGumMatrixMode(GU_MODEL);
 				sceGumPushMatrix();
-				_gl_load_transform(camera_transform_inverse);
+				_gl_load_transform(Transform3D());
 				for(int i=0;i<particles->data.amount;i++) {
 
 					ParticleSystemDrawInfoSW::ParticleDrawInfo &pinfo=*particle_draw_info.draw_info_order[i];
@@ -4050,7 +4199,7 @@ void RasterizerPSP::end_scene() {
 
 	//sceGuAmbient(MK_RGBA(255, 255, 255, 255));
 	
-	sceGuAmbient(0x00222222);
+	sceGuAmbient(0x00333333);
 
 	if (current_env) {
 
@@ -4329,7 +4478,7 @@ void RasterizerPSP::reset_state() {
 	canvas_blend=VS::MATERIAL_BLEND_MODE_MIX;
 	// glLineWidth(1.0);
 	// glDisable(GL_LIGHTING);
-	sceGuEnable(GU_LIGHTING);
+	sceGuDisable(GU_LIGHTING);
 
 }
 
@@ -4371,19 +4520,21 @@ void RasterizerPSP::canvas_set_blend_mode(VS::MaterialBlendMode p_mode) {
 
 			//glBlendEquation(GL_FUNC_ADD);
 			// glBlendFunc(GL_SRC_ALPHA,GL_ONE);
-			sceGuBlendFunc(GU_ADD, GU_SRC_ALPHA, GU_DST_ALPHA, GU_SRC_ALPHA, GU_DST_ALPHA);
+			sceGuBlendFunc(GU_ADD, GU_SRC_ALPHA, GU_ONE_MINUS_DST_ALPHA, GU_SRC_ALPHA, GU_DST_ALPHA);
 
 		 } break;
 		 case VS::MATERIAL_BLEND_MODE_SUB: {
 
 			//glBlendEquation(GL_FUNC_SUBTRACT);
 			// glBlendFunc(GL_SRC_ALPHA,GL_ONE);
-			sceGuBlendFunc(GU_SUBTRACT, GU_SRC_ALPHA, GU_DST_ALPHA, GU_SRC_ALPHA, GU_DST_ALPHA);
+			//sceGuBlendFunc(GU_SUBTRACT, GU_SRC_ALPHA, GU_DST_ALPHA, GU_SRC_ALPHA, GU_DST_ALPHA);
+			sceGuBlendFunc(GU_SUBTRACT, GU_SRC_ALPHA, GU_ONE_MINUS_DST_ALPHA, GU_SRC_ALPHA, GU_DST_ALPHA);
 		 } break;
 		case VS::MATERIAL_BLEND_MODE_MUL: {
 			//glBlendEquation(GL_FUNC_ADD);
-			// glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
-			sceGuBlendFunc(GU_ADD, GU_SRC_ALPHA, GU_ONE_MINUS_SRC_ALPHA, GU_SRC_ALPHA, GU_ONE_MINUS_SRC_ALPHA);
+			//glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
+			//sceGuBlendFunc(GU_ADD, GU_SRC_ALPHA, GU_ONE_MINUS_SRC_ALPHA, GU_SRC_ALPHA, GU_ONE_MINUS_SRC_ALPHA);
+			sceGuBlendFunc(GU_ADD, GU_DST_COLOR, GU_FIX, GU_SRC_ALPHA, GU_DST_ALPHA);
 
 		} break;
 
@@ -4444,7 +4595,7 @@ void RasterizerPSP::canvas_draw_line(const Point2& p_from, const Point2& p_to,co
 
 }
 
-static void _draw_textured_quad(const Rect2& p_rect, const Rect2& p_src_region, const Size2& p_tex_size,bool p_flip_h=false,bool p_flip_v=false ) {
+void RasterizerPSP::_draw_textured_quad(const Rect2& p_rect, const Rect2& p_src_region, const Size2& p_tex_size,bool p_flip_h,bool p_flip_v ) {
 	Vector3 texcoords[4]= {
 		Vector3( p_src_region.pos.x/p_tex_size.width,
 		p_src_region.pos.y/p_tex_size.height, 0),
@@ -4479,7 +4630,7 @@ static void _draw_textured_quad(const Rect2& p_rect, const Rect2& p_src_region, 
 	_draw_primitive(4,coords,0,0,texcoords);
 }
 
-static void _draw_quad(const Rect2& p_rect) {
+void RasterizerPSP::_draw_quad(const Rect2& p_rect) {
 	Vector3 coords[4]= {
 		Vector3( p_rect.pos.x,p_rect.pos.y, 0 ),
 		Vector3( p_rect.pos.x+p_rect.size.width,p_rect.pos.y, 0 ),
@@ -5581,11 +5732,11 @@ int RasterizerPSP::get_render_info(VS::RenderInfo p_info) {
 		} break;
 		case VS::INFO_TEXTURE_MEM_USED: {
 
-			_rinfo.texture_mem;
+			return _rinfo.texture_mem;
 		} break;
 		case VS::INFO_VERTEX_MEM_USED: {
 
-			return 0;
+			return _rinfo.vertex_count * 12; // assuming it stores 32bit float positions
 		} break;
 	}
 
